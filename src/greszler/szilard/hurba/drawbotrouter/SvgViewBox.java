@@ -1,11 +1,15 @@
 package greszler.szilard.hurba.drawbotrouter;
 
+/**
+ * 
+ * Container class for an SVG ViewBox
+ * 
+ */
 public class SvgViewBox {
 
 	private double minX, minY, width, height;
 	
 	public SvgViewBox() {
-		// TODO Auto-generated constructor stub
 	}
 
 	public SvgViewBox(double minX, double minY, double width, double height) {

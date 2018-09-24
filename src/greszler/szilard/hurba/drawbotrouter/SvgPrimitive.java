@@ -1,12 +1,16 @@
 package greszler.szilard.hurba.drawbotrouter;
 
+/**
+ * 
+ * Container class for an SVG path primitive
+ * 
+ */
 public class SvgPrimitive {
 
 	private String action;
 	private double x, y;
 	
 	public SvgPrimitive() {
-		// TODO Auto-generated constructor stub
 	}
 
 	public SvgPrimitive(String action) {

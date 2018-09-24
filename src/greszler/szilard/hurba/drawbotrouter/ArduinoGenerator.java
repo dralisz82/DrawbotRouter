@@ -3,6 +3,11 @@ package greszler.szilard.hurba.drawbotrouter;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 
+ * Class for generating Arduino code from path data
+ * 
+ */
 public class ArduinoGenerator {
 
 	private String title, description;
@@ -178,6 +183,16 @@ public class ArduinoGenerator {
 		println("}");
 	}
 	
+	/**
+	 * Extracting primitives from a path's 'd' attribute
+	 * Limitations:
+	 * 		- only space separator is accepted, supporting comma is coming soon
+	 * 		- implicit commands by consecutive coordinates are not supported
+	 * 		- encountering an unsupported command yields a NullPointerException, when adding first coordinate to actualPrimitive, which is null
+	 * 		  or coordinates of the last accepted primitive will be overwritten
+	 * @param path: value of 'd' attribute
+	 * @param pathNum: number of paths processed, for statistical purposes
+	 */
 	private void processPath(String path, int pathNum) {
 		List<SvgPrimitive> primitives = new ArrayList<SvgPrimitive>();
 		String[] tokens = path.split(" ");
@@ -185,17 +200,21 @@ public class ArduinoGenerator {
 		SvgPrimitive actualPrimitive = null;
 		boolean closedPath = false;
 		
-		// Extracting primitives from "d" tag
+		// Extracting primitives from 'd' attribute
 		for(String token : tokens) {
 			if(token.equals("M")) {
+				// move to absolute coordinate
 				actualPrimitive = new SvgPrimitive("M");
 				numberOfCoordinate = 0;
 			} else if(token.equals("L")) {
+				// line to absolute coordinate
 				actualPrimitive = new SvgPrimitive("L");
 				numberOfCoordinate = 0;
 			} else if(token.equals("z")) {
+				// close path
 				closedPath = true;
 			} else if(token.matches("-{0,1}[0-9]+\\.{0,1}[0-9]*")) {
+				// parsing decimal or real numbers, treating them as coordinates for last action
 				if(numberOfCoordinate == 0) {
 					actualPrimitive.setX(Double.parseDouble(token));
 					numberOfCoordinate++;
@@ -204,21 +223,39 @@ public class ArduinoGenerator {
 					primitives.add(actualPrimitive);
 					numberOfCoordinate++;
 				} else
-					throw new IllegalArgumentException("More than 2 coordinates not allowed for a point in 2D plane! Extra coordinate: "+ token);
+					throw new IllegalArgumentException("More than 2 coordinates not allowed for a point in 2D plane! Extra coordinate: " + token);
 			}
 		}
+		
+/*		// Adding a straight line back to initial coordinates
+		if(closedPath) {
+			SvgPrimitive toHomePrimitive = new SvgPrimitive("L");
+			// TODO
+			primitives.add(toHomePrimitive);
+		}*/
 		
 		// Processing primitives
 		for(SvgPrimitive primitive : primitives)
 			processPrimitive(primitive);
-		
-		// This looks like not needed, as initial coordinates are repeated in svg for closed paths
-/*		if(closedPath && firstPrimitive != null) {
-			firstPrimitive.setAction("L");
-			processPrimitive(firstPrimitive);
-		}*/		
 	}
 	
+	/**
+	 * Translates a single SVG primitive to robot motion commands
+	 * 
+	 * SVG 1.1 path primitives supported by DrawbotRouter:
+	 *     M = moveto
+	 *     L = lineto
+	 * SVG 1.1 path primitives not supported by DrawbotRouter:
+	 *     H = horizontal lineto
+	 *     V = vertical lineto
+	 *     C = curveto
+	 *     S = smooth curveto
+	 *     Q = quadratic Bézier curve
+	 *     T = smooth quadratic Bézier curveto
+	 *     A = elliptical Arc
+	 *     Z = closepath
+	 * @param primitive: a valid SvgPrimitive to be processed
+	 */
 	private void processPrimitive(SvgPrimitive primitive) {
 		double pathToTakeX, pathToTakeY, distanceToTake, newDirection, turningAngle, adjustedTurningAngle;
 		boolean reverseDirection = false;
@@ -249,6 +286,7 @@ public class ArduinoGenerator {
 		distanceToTake = Math.sqrt(Math.pow(pathToTakeX, 2) + Math.pow(pathToTakeY, 2));
 		
 		// Skip too small movements to reduce number of instructions (makes picture a tiny bit rude)
+		// TODO make this optimization configurable
 		if(distanceToTake < 2)
 			return;
 		
@@ -300,6 +338,11 @@ public class ArduinoGenerator {
 		robotPosY = primitive.getY();
 	}
 	
+	/**
+	 * Helper function to shorten println statements
+	 * Makes it possible to implement writing into a file instead of stdout
+	 * @param obj
+	 */
 	private void println(Object obj) {
 		System.out.println(obj);
 	}
