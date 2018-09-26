@@ -186,109 +186,174 @@ public class ArduinoGenerator {
 	/**
 	 * Extracting primitives from a path's 'd' attribute
 	 * Limitations:
-	 * 		- only space separator is accepted, supporting comma is coming soon
-	 * 		- implicit commands by consecutive coordinates are not supported
-	 * 		- encountering an unsupported command yields a NullPointerException, when adding first coordinate to actualPrimitive, which is null
-	 * 		  or coordinates of the last accepted primitive will be overwritten
+	 * 		- a space separator is mandatory around action marks
 	 * @param path: value of 'd' attribute
 	 * @param pathNum: number of paths processed, for statistical purposes
 	 */
 	private void processPath(String path, int pathNum) {
 		List<SvgPrimitive> primitives = new ArrayList<SvgPrimitive>();
-		String[] tokens = path.split(" ");
+		String[] tokens = path.split("[ ,]");
 		int numberOfCoordinate = 0;
 		SvgPrimitive actualPrimitive = null;
 		boolean closedPath = false;
+		boolean firstPrimitive = true;
 		
 		// Extracting primitives from 'd' attribute
 		for(String token : tokens) {
-			if(token.equals("M")) {
-				// move to absolute coordinate
-				actualPrimitive = new SvgPrimitive("M");
+			if(token.matches("[MmLlHhVvCcSsQqTtAa]")) {
+				// initializing a new primitive
+				actualPrimitive = new SvgPrimitive(token);
 				numberOfCoordinate = 0;
-			} else if(token.equals("L")) {
-				// line to absolute coordinate
-				actualPrimitive = new SvgPrimitive("L");
-				numberOfCoordinate = 0;
-			} else if(token.equals("z")) {
+			} else if(token.matches("[Zz]")) {
 				// close path
 				closedPath = true;
-			} else if(token.matches("-{0,1}[0-9]+\\.{0,1}[0-9]*")) {
-				// parsing decimal or real numbers, treating them as coordinates for last action
-				if(numberOfCoordinate == 0) {
-					actualPrimitive.setX(Double.parseDouble(token));
-					numberOfCoordinate++;
-				} else if(numberOfCoordinate == 1) {
-					actualPrimitive.setY(Double.parseDouble(token));
-					primitives.add(actualPrimitive);
-					numberOfCoordinate++;
-				} else
-					throw new IllegalArgumentException("More than 2 coordinates not allowed for a point in 2D plane! Extra coordinate: " + token);
+			} else if(token.matches("-{0,1}[0-9]+\\.{0,1}[0-9]*") || token.matches("1e-[0-9]")) {
+				// parsing decimal or real numbers, treating them as coordinates for last primitive
+				
+				if(actualPrimitive.getAction().matches("[MmLl]")) {
+					// primitive expects X,Y coordinates
+					if(numberOfCoordinate == 0) {
+						// X
+						actualPrimitive.setX(Double.parseDouble(token));
+						numberOfCoordinate++;
+					} else if(numberOfCoordinate == 1) {
+						// Y
+						actualPrimitive.setY(Double.parseDouble(token));
+						primitives.add(actualPrimitive);
+						numberOfCoordinate++;
+					} else {
+						// Initialize a consecutive primitive
+						String newAction = actualPrimitive.getAction();
+						// In case of moveto action, consecutive actions are lineto
+						if(newAction.equals("M"))
+							newAction = "L";
+						if(newAction.equals("m"))
+							newAction = "l";
+						actualPrimitive = new SvgPrimitive(newAction);
+						actualPrimitive.setX(Double.parseDouble(token));
+						numberOfCoordinate = 1;
+					}
+				} else if(actualPrimitive.getAction().matches("[Hh]")) {
+					// primitive expects a single X coordinate
+					if(numberOfCoordinate == 0) {
+						// X
+						actualPrimitive.setX(Double.parseDouble(token));
+						primitives.add(actualPrimitive);
+						numberOfCoordinate++;
+					} else {
+						// Initialize a consecutive primitive
+						actualPrimitive = new SvgPrimitive(actualPrimitive.getAction());
+						actualPrimitive.setX(Double.parseDouble(token));
+						primitives.add(actualPrimitive);
+						numberOfCoordinate = 1;
+					}
+				} else if(actualPrimitive.getAction().matches("[Vv]")) {
+					// primitive expects a single Y coordinate
+					if(numberOfCoordinate == 0) {
+						// Y
+						actualPrimitive.setY(Double.parseDouble(token));
+						primitives.add(actualPrimitive);
+						numberOfCoordinate++;
+					} else {
+						// Initialize a consecutive primitive
+						actualPrimitive = new SvgPrimitive(actualPrimitive.getAction());
+						actualPrimitive.setY(Double.parseDouble(token));
+						primitives.add(actualPrimitive);
+						numberOfCoordinate = 1;
+					}
+				}
 			}
 		}
 		
-/*		// Adding a straight line back to initial coordinates
+		// Adding a straight line back to initial coordinates
 		if(closedPath) {
 			SvgPrimitive toHomePrimitive = new SvgPrimitive("L");
-			// TODO
+			toHomePrimitive.setX(primitives.get(0).getX());
+			toHomePrimitive.setY(primitives.get(0).getY());
 			primitives.add(toHomePrimitive);
-		}*/
+		}
 		
 		// Processing primitives
-		for(SvgPrimitive primitive : primitives)
-			processPrimitive(primitive);
+		for(SvgPrimitive primitive : primitives) {
+			processPrimitive(primitive, firstPrimitive);
+			firstPrimitive = false;
+		}
 	}
 	
 	/**
 	 * Translates a single SVG primitive to robot motion commands
 	 * 
 	 * SVG 1.1 path primitives supported by DrawbotRouter:
-	 *     M = moveto
-	 *     L = lineto
+	 *     M/m = moveto
+	 *     L/l = lineto
+	 *     H/h = horizontal lineto
+	 *     V/v = vertical lineto
+	 *     Z/z = closepath
 	 * SVG 1.1 path primitives not supported by DrawbotRouter:
-	 *     H = horizontal lineto
-	 *     V = vertical lineto
-	 *     C = curveto
-	 *     S = smooth curveto
-	 *     Q = quadratic Bézier curve
-	 *     T = smooth quadratic Bézier curveto
-	 *     A = elliptical Arc
-	 *     Z = closepath
+	 *     C/c = curveto
+	 *     S/s = smooth curveto
+	 *     Q/q = quadratic Bézier curve
+	 *     T/t = smooth quadratic Bézier curveto
+	 *     A/a = elliptical Arc
 	 * @param primitive: a valid SvgPrimitive to be processed
+	 * @param firstPrimitive: whether it is the first primitive of a path (always absolute)
 	 */
-	private void processPrimitive(SvgPrimitive primitive) {
+	private void processPrimitive(SvgPrimitive primitive, boolean firstPrimitive) {
 		double pathToTakeX, pathToTakeY, distanceToTake, newDirection, turningAngle, adjustedTurningAngle;
 		boolean reverseDirection = false;
+		boolean absoluteCoordinates = false;
 		
 		if(primitive == null)
 			return;
 		
-		println("  // " + primitive);
+		println("  // " + primitive + (firstPrimitive?" (new path)":""));
 
 		// Deciding whether to draw or move
-		if(primitive.getAction().equals("L")) {
-			if(!robotDraws) {
-				println("  // Drawing a line");
-				println("  penDown();");
-			}
-			robotDraws = true;
-		} else {
-			// For M and unknown actions
+		if(primitive.getAction().matches("[Mm]")) {
+			// For M or m actions
 			if(robotDraws) {
 				println("  // Just moving to new position");
 				println("  penUp();");
 			}
 			robotDraws = false;
+		} else {
+			// Start drawing
+			if(!robotDraws) {
+				println("  // Drawing a line");
+				println("  penDown();");
+			}
+			robotDraws = true;
 		}
 		
-		pathToTakeX = primitive.getX()-robotPosX;
-		pathToTakeY = primitive.getY()-robotPosY;
+		// coordinates of first primitive are always absolute
+		if(primitive.getAction().matches("[MLHVCSQTA]") || firstPrimitive)
+			absoluteCoordinates = true;
+		
+		if(absoluteCoordinates) {
+			// Calculating X,Y pathToTake for M, L, H, V
+			pathToTakeX = primitive.getX()-robotPosX;
+			pathToTakeY = primitive.getY()-robotPosY;
+			
+			// Correcting steady X, Y for H, V
+			if(primitive.getAction().equals("H"))
+				pathToTakeY = 0;
+			if(primitive.getAction().equals("V"))
+				pathToTakeX = 0;
+		} else {
+			// We can directly use relative coordinates
+			// Steady coordinates in case of h and v were set to 0, when primitive was initialized
+			pathToTakeX = primitive.getX();
+			pathToTakeY = primitive.getY();
+		}
+		
 		distanceToTake = Math.sqrt(Math.pow(pathToTakeX, 2) + Math.pow(pathToTakeY, 2));
 		
 		// Skip too small movements to reduce number of instructions (makes picture a tiny bit rude)
 		// TODO make this optimization configurable
 		if(distanceToTake < 2)
 			return;
+
+		println("  // pathToTakeX: " + pathToTakeX + ", pathToTakeY: " + pathToTakeY + ", distanceToTake: " + distanceToTake);
 		
 		newDirection = Math.atan2(pathToTakeY, pathToTakeX) / Math.PI * 180;	// result is between -180 and 180
 		
@@ -327,15 +392,16 @@ public class ArduinoGenerator {
 			reverseDirection = true;
 			robotOrientation += adjustedTurningAngle;
 		}
-		println("  // newDirection: " + newDirection + ", newOrientation: " + robotOrientation + ", turningAngle: " + ((turningAngle > 90)?"-":"") + adjustedTurningAngle);
-		println("  // pathToTakeX: " + pathToTakeX + ", pathToTakeY: " + pathToTakeY + ", distanceToTake: " + distanceToTake + (reverseDirection?" (reversing)":""));
+		println("  // newDirection: " + newDirection + ", newOrientation: " + robotOrientation + ", turningAngle: " + ((turningAngle > 90)?"-":"") + adjustedTurningAngle + (reverseDirection?" (reversing)":""));
 		if(reverseDirection)
-			println("  backward(" + distanceToTake + ");\n");
+			println("  backward(" + distanceToTake + ");");
 		else
-			println("  forward(" + distanceToTake + ");\n");
+			println("  forward(" + distanceToTake + ");");
 
-		robotPosX = primitive.getX();	// TODO should be recalculated from turningAngle and distanceToTake
-		robotPosY = primitive.getY();
+		robotPosX += pathToTakeX;
+		robotPosY += pathToTakeY;
+		
+		println("  // Robot position: " + robotPosX + ", " + robotPosY + "\n");
 	}
 	
 	/**

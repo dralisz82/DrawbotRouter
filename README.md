@@ -5,7 +5,7 @@ Supported robot: http://hungarianrobot.hu/wordpress/portfolio-item/drawbot/
 
 Supported SVG primitives:
 Currently only path tags containing straight sections are supported.
-Example: <path d="M 0 0 L 4 0 L 4 6 L 0 6 L 0 0" />
+Example: <path d="M 0 0 L 4 0 V 6 h -4 z" />
 
 Compatible SVG sources:
 TinkerCAD provides compatible SVG export (https://www.tinkercad.com/)
